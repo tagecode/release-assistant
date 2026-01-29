@@ -9,8 +9,10 @@ export function Layout({ navItems }: LayoutProps) {
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar navItems={navItems} />
-      <main className="flex-1 overflow-y-auto bg-background">
-        <Outlet />
+      <main className="flex-1 overflow-y-auto bg-background p-8">
+        <div className="mx-auto max-w-7xl">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
