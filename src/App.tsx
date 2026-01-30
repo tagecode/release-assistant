@@ -14,7 +14,8 @@ import {
   Radius,
   Smartphone,
   Key,
-  Lock
+  Lock,
+  ShieldCheck
 } from "lucide-react";
 import { HomePage } from "@/pages/home";
 import { DashboardPage } from "@/pages/dashboard";
@@ -28,6 +29,7 @@ import { ImageRadiusPage } from "@/pages/image-radius";
 import { IconGeneratorPage } from "@/pages/icon-generator";
 import { UuidGeneratorPage } from "@/pages/uuid-generator";
 import { PasswordGeneratorPage } from "@/pages/password-generator";
+import { ApkSignaturePage } from "@/pages/apk-signature";
 
 // 定义导航菜单结构
 const navItems: NavItem[] = [
@@ -49,6 +51,11 @@ const navItems: NavItem[] = [
         title: "包解析（Android）",
         path: "/package-parse",
         icon: <FileSearch className="h-4 w-4" />,
+      },
+      {
+        title: "APK 签名校验",
+        path: "/apk-signature",
+        icon: <ShieldCheck className="h-4 w-4" />,
       },
       {
         title: "UUID 生成器",
@@ -114,6 +121,7 @@ function App() {
           <Route index element={<HomePage />} />
           <Route path="package-info" element={<PackageInfoPage />} />
           <Route path="package-parse" element={<PackageParsePage />} />
+          <Route path="apk-signature" element={<ApkSignaturePage />} />
           <Route path="uuid-generator" element={<UuidGeneratorPage />} />
           <Route path="password-generator" element={<PasswordGeneratorPage />} />
           <Route path="image-process" element={<ImageProcessPage />} />
