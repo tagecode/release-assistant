@@ -96,7 +96,7 @@ export function Sidebar({ navItems, className }: SidebarProps) {
       )}
     >
       <div className="flex h-16 items-center border-b px-6">
-        <h1 className="text-lg font-semibold">Tauri App</h1>
+        <h1 className="text-lg font-semibold">应用发布助手</h1>
       </div>
       <nav className="flex-1 overflow-y-auto p-4">
         <ul className="space-y-1">

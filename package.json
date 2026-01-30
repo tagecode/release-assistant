@@ -2,6 +2,7 @@
   "name": "release-assistant",
   "private": true,
   "version": "0.1.0",
+  "description": "Release Assistant - Android APK processing and development tools",
   "type": "module",
   "scripts": {
     "dev": "vite",

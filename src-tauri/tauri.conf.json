@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-desktop-template",
+  "productName": "Release Assistant",
   "version": "0.1.0",
-  "identifier": "com.tauri-desktop-template.app",
+  "identifier": "com.release-assistant.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-desktop-template",
+        "title": "Release Assistant",
         "width": 1200,
         "height": 800
       }
