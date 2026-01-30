@@ -32,11 +32,11 @@ export function PackageParsePage() {
       const selected = await open({
         multiple: false,
         directory: false,
-        title: "选择 APK/AAB 文件",
+        title: "选择 APK/AAB/XAPK 文件",
         filters: [
           {
             name: "Android Package",
-            extensions: ["apk", "aab"],
+            extensions: ["apk", "aab", "xapk"],
           },
         ],
       });
@@ -93,10 +93,10 @@ export function PackageParsePage() {
       {/* 页面标题区域 */}
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">
-          包解析（Android: APK, AAB）
+          包解析（Android: APK, AAB, XAPK）
         </h1>
         <p className="text-muted-foreground text-lg">
-          解析 Android 应用包的详细信息
+          解析 Android 应用包的详细信息（支持 XAPK 格式）
         </p>
       </div>
 
