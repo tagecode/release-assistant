@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Upload, Download, RefreshCw, Smartphone, Monitor, Tablet, CheckCircle2, Package } from "lucide-react";
+import { DownloadDialog, DownloadOptions } from "@/components/download-dialog";
+import { Upload, RefreshCw, Smartphone, Monitor, Tablet, CheckCircle2, Download } from "lucide-react";
 
 interface IconSize {
   name: string;
@@ -40,6 +41,10 @@ export function IconGeneratorPage() {
   const [generatedIcons, setGeneratedIcons] = useState<GeneratedIcon[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // 下载弹窗相关状态
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [downloadOptions, setDownloadOptions] = useState<DownloadOptions | null>(null);
+
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -68,6 +73,9 @@ export function IconGeneratorPage() {
     try {
       // 移除 data URL 前缀
       const base64Data = imageSrc.split(',')[1];
+
+      // 添加小的延迟让 UI 更新
+      await new Promise(resolve => setTimeout(resolve, 50));
 
       // 调用 Rust 后端生成图标
       const result = await invoke<GeneratedIcon[]>("generate_app_icons", {
@@ -127,35 +135,26 @@ export function IconGeneratorPage() {
     }
   };
 
-  const handleDownloadSingle = async (icon: GeneratedIcon) => {
-    try {
-      // 将 base64 数据转换为 Uint8Array
-      const base64Data = icon.url.split(',')[1];
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      // 使用 Tauri 的文件保存对话框
-      const filePath = await save({
-        filters: [{
-          name: 'PNG 图片',
-          extensions: ['png']
-        }],
-        defaultPath: `icon-${icon.size}x${icon.size}.png`
-      });
-
-      if (filePath) {
-        await invoke('write_file', {
-          path: filePath,
-          contents: Array.from(bytes)
-        });
-      }
-    } catch (err) {
-      console.error("下载失败:", err);
-      setError(`下载失败: ${err}`);
+  const handleDownloadSingle = (icon: GeneratedIcon) => {
+    // 将 base64 数据转换为 Uint8Array
+    const base64Data = icon.url.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
+
+    // 设置下载选项并打开弹窗
+    setDownloadOptions({
+      fileName: `icon-${icon.size}x${icon.size}.png`,
+      fileData: bytes,
+      filters: [{
+        name: 'PNG 图片',
+        extensions: ['png']
+      }],
+      preview: icon.url
+    });
+    setDownloadDialogOpen(true);
   };
 
   return (
@@ -320,7 +319,7 @@ export function IconGeneratorPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {iconSizes.map((item) => (
                   <button
-                    key={item.size}
+                    key={item.name}
                     onClick={() => handleSizeToggle(item.size)}
                     className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
                       selectedSizes.includes(item.size)
@@ -401,7 +400,6 @@ export function IconGeneratorPage() {
                           onClick={() => handleDownloadSingle(icon)}
                           className="mt-2 h-7 text-xs"
                         >
-                          <Download className="mr-1 h-3 w-3" />
                           下载
                         </Button>
                       </div>
@@ -441,6 +439,13 @@ export function IconGeneratorPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 下载弹窗 */}
+      <DownloadDialog
+        open={downloadDialogOpen}
+        onOpenChange={setDownloadDialogOpen}
+        options={downloadOptions}
+      />
     </div>
   );
 }

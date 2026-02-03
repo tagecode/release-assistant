@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Upload, Download, RefreshCw, CheckCircle2, Lock, Unlock, RotateCcw } from "lucide-react";
+import { DownloadDialog, DownloadOptions } from "@/components/download-dialog";
+import { Upload, RefreshCw, CheckCircle2, Lock, Unlock, RotateCcw } from "lucide-react";
 
 type ResizeMode = "fit" | "fill" | "stretch";
 
@@ -21,8 +21,11 @@ export function ImageProcessPage() {
   const [quality, setQuality] = useState([90]);
 
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 下载弹窗相关状态
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [downloadOptions, setDownloadOptions] = useState<DownloadOptions | null>(null);
 
   // 计算宽高比
   const aspectRatio = originalSize.width > 0 ? originalSize.width / originalSize.height : 1;
@@ -74,6 +77,9 @@ export function ImageProcessPage() {
       // 移除 data URL 前缀
       const base64Data = imageSrc.split(',')[1];
 
+      // 添加小的延迟让 UI 更新
+      await new Promise(resolve => setTimeout(resolve, 50));
+
       // 调用 Rust 后端调整图片尺寸
       const result = await invoke<string>("resize_image", {
         imageBase64: base64Data,
@@ -93,39 +99,27 @@ export function ImageProcessPage() {
     }
   };
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!processedImage) return;
 
-    setIsDownloading(true);
-
-    try {
-      const base64Data = processedImage.split(',')[1];
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      const filePath = await save({
-        filters: [{
-          name: `${outputFormat.toUpperCase()} 图片`,
-          extensions: [outputFormat]
-        }],
-        defaultPath: `resized-${width[0]}x${height[0]}.${outputFormat}`
-      });
-
-      if (filePath) {
-        await invoke('write_file', {
-          path: filePath,
-          contents: Array.from(bytes)
-        });
-      }
-    } catch (err) {
-      console.error("下载失败:", err);
-      setError(`下载失败: ${err}`);
-    } finally {
-      setIsDownloading(false);
+    const base64Data = processedImage.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
+
+    // 设置下载选项并打开弹窗
+    setDownloadOptions({
+      fileName: `resized-${width[0]}x${height[0]}.${outputFormat}`,
+      fileData: bytes,
+      filters: [{
+        name: `${outputFormat.toUpperCase()} 图片`,
+        extensions: [outputFormat]
+      }],
+      preview: processedImage
+    });
+    setDownloadDialogOpen(true);
   };
 
   const handleReset = () => {
@@ -370,21 +364,11 @@ export function ImageProcessPage() {
               </Button>
               <Button
                 onClick={handleDownload}
-                disabled={!processedImage || isDownloading}
+                disabled={!processedImage}
                 variant="outline"
                 className="w-full"
               >
-                {isDownloading ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    下载中...
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-2 h-4 w-4" />
-                    下载图片
-                  </>
-                )}
+                下载图片
               </Button>
             </CardContent>
           </Card>
@@ -526,6 +510,13 @@ export function ImageProcessPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* 下载弹窗 */}
+      <DownloadDialog
+        open={downloadDialogOpen}
+        onOpenChange={setDownloadDialogOpen}
+        options={downloadOptions}
+      />
     </div>
   );
 }

@@ -688,17 +688,17 @@ async fn resize_image(
 
             let resized = image::imageops::resize(&img, new_width, new_height, FilterType::Lanczos3);
 
-            // 创建目标尺寸的画布并居中放置
-            let mut canvas = DynamicImage::new_rgba8(target_width, target_height);
-            for pixel in canvas.as_mut_rgba8().unwrap().pixels_mut() {
-                *pixel = image::Rgba([0, 0, 0, 0]); // 透明背景
-            }
+            // 创建目标尺寸的画布并居中放置 - 优化:使用 fill 代替循环
+            let mut canvas = image::RgbaImage::new(target_width, target_height);
+            canvas.fill(0u8); // 快速填充透明像素
 
             let offset_x = ((target_width - new_width) / 2) as i64;
             let offset_y = ((target_height - new_height) / 2) as i64;
-            image::imageops::overlay(canvas.as_mut_rgba8().unwrap(), &resized, offset_x, offset_y);
 
-            canvas
+            // resized 已经是 ImageBuffer，可以直接 overlay
+            image::imageops::overlay(&mut canvas, &resized, offset_x, offset_y);
+
+            DynamicImage::ImageRgba8(canvas)
         }
         "fill" => {
             // 填充模式:保持宽高比,填满目标区域,裁剪多余部分
@@ -729,7 +729,18 @@ async fn resize_image(
     // 编码为输出格式
     let mut buffer = Vec::new();
     let format = match output_format.as_str() {
-        "image/png" | "png" => ImageFormat::Png,
+        "image/png" | "png" => {
+            // PNG 编码 - 使用快速压缩级别
+            let mut cursor = std::io::Cursor::new(&mut buffer);
+            let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                &mut cursor,
+                image::codecs::png::CompressionType::Fast,
+                image::codecs::png::FilterType::Adaptive
+            );
+            resized_img.write_with_encoder(encoder)
+                .map_err(|e| format!("PNG 编码失败: {}", e))?;
+            ImageFormat::Png
+        }
         "image/jpeg" | "jpg" | "jpeg" => ImageFormat::Jpeg,
         "image/webp" | "webp" => ImageFormat::WebP,
         _ => ImageFormat::Png,
@@ -747,7 +758,8 @@ async fn resize_image(
             resized_img.height(),
             image::ExtendedColorType::Rgb8,
         ).map_err(|e| format!("图片编码失败: {}", e))?;
-    } else {
+    } else if format != ImageFormat::Png {
+        // 非PNG格式使用标准编码
         resized_img.write_to(&mut cursor, format)
             .map_err(|e| format!("图片编码失败: {}", e))?;
     }
@@ -793,6 +805,15 @@ async fn add_image_radius(
     // 编码为输出格式
     let mut buffer = Vec::new();
     let format = if output_format == "image/png" || output_format == "png" {
+        // PNG 编码 - 使用快速压缩级别
+        let mut cursor = std::io::Cursor::new(&mut buffer);
+        let encoder = image::codecs::png::PngEncoder::new_with_quality(
+            &mut cursor,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::Adaptive
+        );
+        rounded_img.write_with_encoder(encoder)
+            .map_err(|e| format!("PNG 编码失败: {}", e))?;
         ImageFormat::Png
     } else if output_format == "image/jpeg" || output_format == "jpg" || output_format == "jpeg" {
         ImageFormat::Jpeg
@@ -802,10 +823,12 @@ async fn add_image_radius(
         ImageFormat::Png
     };
 
-    // 写入图片数据
-    let mut cursor = std::io::Cursor::new(&mut buffer);
-    rounded_img.write_to(&mut cursor, format)
-        .map_err(|e| format!("图片编码失败: {}", e))?;
+    // 对于非 PNG 格式，使用标准编码
+    if format != ImageFormat::Png {
+        let mut cursor = std::io::Cursor::new(&mut buffer);
+        rounded_img.write_to(&mut cursor, format)
+            .map_err(|e| format!("图片编码失败: {}", e))?;
+    }
 
     // 转换为 base64
     let base64_string = base64::engine::general_purpose::STANDARD.encode(&buffer);
@@ -817,32 +840,70 @@ async fn add_image_radius(
 /// 创建带圆角的图片(支持透明)
 fn create_rounded_image(img: &DynamicImage, radius: u32) -> Result<DynamicImage, String> {
     let (width, height) = img.dimensions();
+
+    // 如果半径为0，直接返回原图
+    if radius == 0 {
+        return Ok(img.clone());
+    }
+
     let mut rgba_img = img.to_rgba8();
 
-    // 创建圆角遮罩
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = rgba_img.get_pixel_mut(x, y);
+    // 预计算圆角遮罩 - 只处理四个角
+    let r = radius as f64;
+    let r_squared = r * r;
 
-            // 检查是否在圆角区域
-            let in_corner = if x < radius && y < radius {
-                // 左上角
-                (x as f64 - radius as f64).powi(2) + (y as f64 - radius as f64).powi(2) > (radius as f64).powi(2)
-            } else if x >= width - radius && y < radius {
-                // 右上角
-                (x as f64 - (width - radius) as f64).powi(2) + (y as f64 - radius as f64).powi(2) > (radius as f64).powi(2)
-            } else if x < radius && y >= height - radius {
-                // 左下角
-                (x as f64 - radius as f64).powi(2) + (y as f64 - (height - radius) as f64).powi(2) > (radius as f64).powi(2)
-            } else if x >= width - radius && y >= height - radius {
-                // 右下角
-                (x as f64 - (width - radius) as f64).powi(2) + (y as f64 - (height - radius) as f64).powi(2) > (radius as f64).powi(2)
-            } else {
-                false
-            };
+    // 左上角
+    for y in 0..radius.min(height) {
+        for x in 0..radius.min(width) {
+            let dx = x as f64 - r;
+            let dy = y as f64 - r;
+            if dx * dx + dy * dy > r_squared {
+                if let Some(pixel) = rgba_img.get_pixel_mut_checked(x, y) {
+                    pixel[3] = 0;
+                }
+            }
+        }
+    }
 
-            if in_corner {
-                pixel[3] = 0; // 设置为完全透明
+    // 右上角
+    for y in 0..radius.min(height) {
+        for x in 0..radius.min(width) {
+            let actual_x = width - 1 - x;
+            let dx = x as f64 - r;
+            let dy = y as f64 - r;
+            if dx * dx + dy * dy > r_squared {
+                if let Some(pixel) = rgba_img.get_pixel_mut_checked(actual_x, y) {
+                    pixel[3] = 0;
+                }
+            }
+        }
+    }
+
+    // 左下角
+    for y in 0..radius.min(height) {
+        for x in 0..radius.min(width) {
+            let actual_y = height - 1 - y;
+            let dx = x as f64 - r;
+            let dy = y as f64 - r;
+            if dx * dx + dy * dy > r_squared {
+                if let Some(pixel) = rgba_img.get_pixel_mut_checked(x, actual_y) {
+                    pixel[3] = 0;
+                }
+            }
+        }
+    }
+
+    // 右下角
+    for y in 0..radius.min(height) {
+        for x in 0..radius.min(width) {
+            let actual_x = width - 1 - x;
+            let actual_y = height - 1 - y;
+            let dx = x as f64 - r;
+            let dy = y as f64 - r;
+            if dx * dx + dy * dy > r_squared {
+                if let Some(pixel) = rgba_img.get_pixel_mut_checked(actual_x, actual_y) {
+                    pixel[3] = 0;
+                }
             }
         }
     }
@@ -904,30 +965,35 @@ async fn generate_app_icons(
             image::imageops::FilterType::Lanczos3,
         );
 
-        // 创建正方形画布
+        // 创建正方形画布 - 优化:使用 fill 代替循环
         let mut canvas = image::RgbaImage::new(size, size);
-
-        // 填充背景色(可选,这里使用透明)
-        for pixel in canvas.pixels_mut() {
-            *pixel = image::Rgba([0, 0, 0, 0]);
-        }
+        canvas.fill(0u8); // 快速填充透明像素
 
         // 居中放置调整后的图片
-        let offset_x = padding;
-        let offset_y = padding;
-        image::imageops::overlay(&mut canvas, &resized, offset_x as i64, offset_y as i64);
+        let offset_x = padding as i64;
+        let offset_y = padding as i64;
+        image::imageops::overlay(&mut canvas, &resized, offset_x, offset_y);
 
-        // 应用圆角
+        // 应用圆角 - 优化:直接传递引用,避免克隆
         let radius = (size as f64 * radius_percent as f64 / 100.0) as u32;
         let rounded = if radius > 0 {
-            create_rounded_image(&DynamicImage::ImageRgba8(canvas.clone()), radius)?
+            create_rounded_image(&DynamicImage::ImageRgba8(canvas), radius)?
         } else {
             DynamicImage::ImageRgba8(canvas)
         };
 
-        // 编码为输出格式
+        // 编码为输出格式 - 优化PNG编码
         let mut buffer = Vec::new();
         let format = if output_format == "image/png" || output_format == "png" {
+            // 使用快速PNG编码
+            let mut cursor = std::io::Cursor::new(&mut buffer);
+            let encoder = image::codecs::png::PngEncoder::new_with_quality(
+                &mut cursor,
+                image::codecs::png::CompressionType::Fast,
+                image::codecs::png::FilterType::Adaptive
+            );
+            rounded.write_with_encoder(encoder)
+                .map_err(|e| format!("PNG 编码失败: {}", e))?;
             image::ImageFormat::Png
         } else if output_format == "image/jpeg" || output_format == "jpg" || output_format == "jpeg" {
             image::ImageFormat::Jpeg
@@ -937,9 +1003,12 @@ async fn generate_app_icons(
             image::ImageFormat::Png
         };
 
-        let mut cursor = std::io::Cursor::new(&mut buffer);
-        rounded.write_to(&mut cursor, format)
-            .map_err(|e| format!("图片编码失败: {}", e))?;
+        // 非PNG格式使用标准编码
+        if format != image::ImageFormat::Png {
+            let mut cursor = std::io::Cursor::new(&mut buffer);
+            rounded.write_to(&mut cursor, format)
+                .map_err(|e| format!("图片编码失败: {}", e))?;
+        }
 
         // 转换为 base64
         let base64_string = base64::engine::general_purpose::STANDARD.encode(&buffer);
@@ -1334,11 +1403,53 @@ async fn verify_apk_signature(apk_path: String) -> Result<ApkSignatureResult, St
     })
 }
 
+// ========== 认证相关命令 ==========
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use tauri::State;
+
+// 简单的内存存储 (生产环境应使用数据库或加密存储)
+type Store = Mutex<HashMap<String, String>>;
+
+#[tauri::command]
+async fn set_store(key: String, value: String, store: State<'_, Store>) -> Result<(), String> {
+    let mut store = store.lock().map_err(|e| format!("存储锁定失败: {}", e))?;
+    store.insert(key, value);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_store(key: String, store: State<'_, Store>) -> Result<String, String> {
+    let store = store.lock().map_err(|e| format!("存储锁定失败: {}", e))?;
+    store.get(&key)
+        .cloned()
+        .ok_or_else(|| "键不存在".to_string())
+}
+
+#[tauri::command]
+async fn delete_store(key: String, store: State<'_, Store>) -> Result<(), String> {
+    let mut store = store.lock().map_err(|e| format!("存储锁定失败: {}", e))?;
+    store.remove(&key);
+    Ok(())
+}
+
+#[tauri::command]
+async fn clear_store(store: State<'_, Store>) -> Result<(), String> {
+    let mut store = store.lock().map_err(|e| format!("存储锁定失败: {}", e))?;
+    store.clear();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化存储
+    let store: Store = Mutex::new(HashMap::new());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(store)
         .invoke_handler(tauri::generate_handler![
             greet,
             get_file_info,
@@ -1349,7 +1460,11 @@ pub fn run() {
             write_file,
             generate_uuids,
             generate_passwords,
-            verify_apk_signature
+            verify_apk_signature,
+            set_store,
+            get_store,
+            delete_store,
+            clear_store
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,19 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Upload, Download, RefreshCw, CheckCircle2 } from "lucide-react";
+import { DownloadDialog, DownloadOptions } from "@/components/download-dialog";
+import { Upload, RefreshCw, CheckCircle2 } from "lucide-react";
 
 export function ImageRadiusPage() {
   const [radius, setRadius] = useState([16]);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 下载弹窗相关状态
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [downloadOptions, setDownloadOptions] = useState<DownloadOptions | null>(null);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -38,6 +41,9 @@ export function ImageRadiusPage() {
       // 移除 data URL 前缀,只保留 base64 数据
       const base64Data = imageSrc.split(',')[1];
 
+      // 添加小的延迟让 UI 更新
+      await new Promise(resolve => setTimeout(resolve, 50));
+
       // 调用 Rust 后端处理图片
       const result = await invoke<string>("add_image_radius", {
         imageBase64: base64Data,
@@ -54,42 +60,28 @@ export function ImageRadiusPage() {
     }
   };
 
-  const handleDownload = async () => {
+  const handleDownload = () => {
     if (!processedImage) return;
 
-    setIsDownloading(true);
-
-    try {
-      // 将 base64 数据转换为 Uint8Array
-      const base64Data = processedImage.split(',')[1];
-      const binaryString = atob(base64Data);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      // 使用 Tauri 的文件保存对话框
-      const filePath = await save({
-        filters: [{
-          name: 'PNG 图片',
-          extensions: ['png']
-        }],
-        defaultPath: `rounded-image-${radius[0]}px.png`
-      });
-
-      if (filePath) {
-        // 保存文件到选择的路径
-        await invoke('write_file', {
-          path: filePath,
-          contents: Array.from(bytes)
-        });
-      }
-    } catch (err) {
-      console.error("下载失败:", err);
-      setError(`下载失败: ${err}`);
-    } finally {
-      setIsDownloading(false);
+    // 将 base64 数据转换为 Uint8Array
+    const base64Data = processedImage.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
+
+    // 设置下载选项并打开弹窗
+    setDownloadOptions({
+      fileName: `rounded-image-${radius[0]}px.png`,
+      fileData: bytes,
+      filters: [{
+        name: 'PNG 图片',
+        extensions: ['png']
+      }],
+      preview: processedImage
+    });
+    setDownloadDialogOpen(true);
   };
 
   return (
@@ -206,21 +198,11 @@ export function ImageRadiusPage() {
               </Button>
               <Button
                 onClick={handleDownload}
-                disabled={!processedImage || isDownloading}
+                disabled={!processedImage}
                 variant="outline"
                 className="w-full"
               >
-                {isDownloading ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    下载中...
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-2 h-4 w-4" />
-                    下载图片
-                  </>
-                )}
+                下载图片
               </Button>
             </CardContent>
           </Card>
@@ -251,16 +233,26 @@ export function ImageRadiusPage() {
                 <div className="flex min-h-[400px] items-center justify-center rounded-lg bg-muted/30 p-8">
                   {imageSrc ? (
                     <div className="space-y-4 w-full">
-                      <img
-                        src={processedImage || imageSrc}
-                        alt="预览"
-                        className="mx-auto max-w-full rounded-lg shadow-lg transition-all duration-300"
-                        style={{ borderRadius: processedImage ? '0' : `${radius[0]}px` }}
-                      />
-                      {!processedImage && (
-                        <p className="text-center text-sm text-muted-foreground">
-                          当前预览为原图圆角效果(实时),点击"应用圆角"生成最终图片
-                        </p>
+                      {isProcessing ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                          <RefreshCw className="h-12 w-12 animate-spin text-primary mb-4" />
+                          <p className="text-sm text-muted-foreground">正在处理图片...</p>
+                          <p className="text-xs text-muted-foreground mt-2">这可能需要几秒钟</p>
+                        </div>
+                      ) : (
+                        <>
+                          <img
+                            src={processedImage || imageSrc}
+                            alt="预览"
+                            className="mx-auto max-w-full rounded-lg shadow-lg transition-all duration-300"
+                            style={{ borderRadius: processedImage ? '0' : `${radius[0]}px` }}
+                          />
+                          {!processedImage && (
+                            <p className="text-center text-sm text-muted-foreground">
+                              当前预览为原图圆角效果(实时),点击"应用圆角"生成最终图片
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                   ) : (
@@ -291,6 +283,13 @@ export function ImageRadiusPage() {
           </ul>
         </CardContent>
       </Card>
+
+      {/* 下载弹窗 */}
+      <DownloadDialog
+        open={downloadDialogOpen}
+        onOpenChange={setDownloadDialogOpen}
+        options={downloadOptions}
+      />
     </div>
   );
 }

@@ -1,13 +1,24 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, LogOut, User as UserIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export interface NavItem {
   title: string;
   path?: string;
   icon?: React.ReactNode;
   children?: NavItem[];
+  requiresAuth?: boolean; // 是否需要登录才能访问
 }
 
 interface SidebarProps {
@@ -24,6 +35,7 @@ function SidebarMenuItem({ item, level = 0 }: SidebarMenuItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasChildren = item.children && item.children.length > 0;
   const location = useLocation();
+  const { isAuthenticated } = useAuth();
 
   // Check if any child is active
   const hasActiveChild = hasChildren
@@ -47,6 +59,11 @@ function SidebarMenuItem({ item, level = 0 }: SidebarMenuItemProps) {
         >
           {item.icon}
           <span className="flex-1 text-left">{item.title}</span>
+          {item.requiresAuth && !isAuthenticated && (
+            <span className="ml-auto text-xs rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+              需登录
+            </span>
+          )}
           {isExpanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
@@ -81,13 +98,30 @@ function SidebarMenuItem({ item, level = 0 }: SidebarMenuItemProps) {
         }
       >
         {item.icon}
-        {item.title}
+        <span className="flex-1">{item.title}</span>
+        {item.requiresAuth && !isAuthenticated && (
+          <span className="text-xs rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+            需登录
+          </span>
+        )}
       </NavLink>
     </li>
   );
 }
 
 export function Sidebar({ navItems, className }: SidebarProps) {
+  const { user, logout, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
+
+  const handleLogin = () => {
+    navigate("/login");
+  };
+
   return (
     <aside
       className={cn(
@@ -105,6 +139,60 @@ export function Sidebar({ navItems, className }: SidebarProps) {
           ))}
         </ul>
       </nav>
+
+      {/* 底部区域：登录按钮或用户信息 */}
+      <div className="border-t p-4">
+        {isAuthenticated && user ? (
+          // 已登录 - 显示用户信息
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 px-3"
+              >
+                {user.avatar ? (
+                  <img
+                    src={user.avatar}
+                    alt={user.username}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium">
+                    {user.username.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex flex-1 flex-col items-start text-sm">
+                  <span className="font-medium">{user.username}</span>
+                  <span className="text-xs text-muted-foreground">{user.email}</span>
+                </div>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium">{user.username}</p>
+                  <p className="text-xs text-muted-foreground">{user.email}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                <LogOut className="mr-2 h-4 w-4" />
+                退出登录
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          // 未登录 - 显示登录按钮
+          <Button
+            onClick={handleLogin}
+            className="w-full"
+            variant="default"
+          >
+            <UserIcon className="mr-2 h-4 w-4" />
+            登录账户
+          </Button>
+        )}
+      </div>
     </aside>
   );
 }
